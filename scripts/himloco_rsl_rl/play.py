@@ -107,15 +107,22 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg: HIMOnPolicyRunnerCfg):
     env_cfg.log_dir = log_dir
     env_cfg.sim.log_dir = os.path.expanduser("~/isaaclab_logs/himloco")
 
-    # 添加跟随相机用于录视频（挂在 base 上，第三人称视角）
+    # 添加跟随相机用于录视频（挂在 base 子节点上，第三人称视角）
     if args_cli.video:
         from isaaclab.sensors import CameraCfg
+        from isaaclab.sim import sim_utils
         env_cfg.scene.camera = CameraCfg(
-            prim_path="{ENV_REGEX_NS}/Robot/base",
+            prim_path="{ENV_REGEX_NS}/Robot/base/camera",
             update_period=0.0,
             height=480,
             width=640,
             data_types=["rgb"],
+            spawn=sim_utils.PrimCameraCfg(
+                focal_length=24.0,
+                focus_distance=400.0,
+                horizontal_aperture=20.955,
+                clipping_range=(0.1, 1.0e5),
+            ),
             offset=CameraCfg.OffsetCfg(pos=(-2.5, 0.0, 1.0), rot=(0.6502, 0.0, 0.0, -0.7599), convention="world"),
         )
 
