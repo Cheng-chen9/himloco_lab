@@ -110,20 +110,31 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg: HIMOnPolicyRunnerCfg):
     # 添加跟随相机用于录视频（挂在 base 子节点上，第三人称视角）
     if args_cli.video:
         from isaaclab.sensors import CameraCfg
-        from isaaclab.sim import sim_utils
+        import importlib
+        _pinhole = None
+        for _mod in ["isaaclab.sim.spawners.sensors", "isaaclab.sim.spawners.sensors.camera", "isaaclab.sim.sim_utils", "isaaclab.sim.spawners"]:
+            try:
+                _m = importlib.import_module(_mod)
+                if hasattr(_m, "PinholeCameraCfg"):
+                    _pinhole = getattr(_m, "PinholeCameraCfg")
+                    break
+            except ImportError:
+                continue
+        if _pinhole is None:
+            raise RuntimeError("找不到 PinholeCameraCfg，请运行 grep 查位置")
         env_cfg.scene.camera = CameraCfg(
             prim_path="{ENV_REGEX_NS}/Robot/base/camera",
             update_period=0.0,
             height=480,
             width=640,
             data_types=["rgb"],
-            spawn=sim_utils.PrimCameraCfg(
+            spawn=_pinhole(
                 focal_length=24.0,
                 focus_distance=400.0,
                 horizontal_aperture=20.955,
                 clipping_range=(0.1, 1.0e5),
             ),
-            offset=CameraCfg.OffsetCfg(pos=(-2.5, 0.0, 1.0), rot=(0.6502, 0.0, 0.0, -0.7599), convention="world"),
+            offset=CameraCfg.OffsetCfg(pos=(-3.0, 0.0, 1.2), rot=(0.6502, 0.0, 0.0, -0.7599), convention="world"),
         )
 
     # create isaac environment
@@ -203,9 +214,8 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg: HIMOnPolicyRunnerCfg):
             obs, privileged_obs, rewards, dones, infos, termination_ids, termination_privileged_obs = env.step(actions)
         
         if args_cli.video:
-            render_dict = env.unwrapped.render(rebuild_render_products=True)
-            img = next(iter(render_dict.values()))
-            video_frames.append(img[0].cpu().numpy())
+            cam_rgb = env.unwrapped.scene["camera"].data.output["rgb"]
+            video_frames.append(cam_rgb[0].cpu().numpy())
             timestep += 1
             # Exit the play loop after recording one video
             if timestep == args_cli.video_length:
@@ -221,9 +231,12 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg: HIMOnPolicyRunnerCfg):
         import numpy as np
         video_path = os.path.join(video_save_dir, "playback.mp4")
         try:
-            from moviepy.editor import ImageSequenceClip
+            try:
+                from moviepy.editor import ImageSequenceClip
+            except ImportError:
+                from moviepy import ImageSequenceClip
             clip = ImageSequenceClip(video_frames, fps=30)
-            clip.write_videofile(video_path, codec="libx264", verbose=False, logger=None)
+            clip.write_videofile(video_path, codec="libx264", logger=None)
             print(f"[INFO] Video saved to: {video_path}")
         except Exception as e:
             print("[WARN] mp4 合成失败，改为保存 PNG 帧:", e)
