@@ -123,7 +123,7 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg: HIMOnPolicyRunnerCfg):
         if _pinhole is None:
             raise RuntimeError("找不到 PinholeCameraCfg，请运行 grep 查位置")
         env_cfg.scene.camera = CameraCfg(
-            prim_path="{ENV_REGEX_NS}/Robot/base/camera",
+            prim_path="{ENV_REGEX_NS}/camera",
             update_period=0.0,
             height=480,
             width=640,
@@ -134,7 +134,6 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg: HIMOnPolicyRunnerCfg):
                 horizontal_aperture=20.955,
                 clipping_range=(0.1, 1.0e5),
             ),
-            offset=CameraCfg.OffsetCfg(pos=(-3.0, 0.0, 1.2), rot=(0.6502, 0.0, 0.0, -0.7599), convention="world"),
         )
 
     # create isaac environment
@@ -200,6 +199,21 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg: HIMOnPolicyRunnerCfg):
 
     # reset environment
     obs = env.get_observations()
+
+    if args_cli.video:
+        import math
+        import numpy as np
+        cam_state = None
+
+        def quat_mul_np(a, b):
+            w1, x1, y1, z1 = a
+            w2, x2, y2, z2 = b
+            return np.array([
+                w1*w2 - x1*x2 - y1*y2 - z1*z2,
+                w1*x2 + x1*w2 + y1*z2 - z1*y2,
+                w1*y2 - x1*z2 + y1*w2 + z1*x2,
+                w1*z2 + x1*y2 - y1*x2 + z1*w2,
+            ])
     timestep = 0
     
     # simulate environment
@@ -216,6 +230,34 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg: HIMOnPolicyRunnerCfg):
         if args_cli.video:
             cam_rgb = env.unwrapped.scene["camera"].data.output["rgb"]
             video_frames.append(cam_rgb[0].cpu().numpy())
+
+            # 平滑跟随：位置低通滤波，朝向只跟偏航
+            robot_data = env.unwrapped.scene["robot"].data
+            rpos = robot_data.root_pos_w[0].cpu().numpy()
+            rquat = robot_data.root_quat_w[0].cpu().numpy()
+            w, x, y, z = rquat
+            yaw = math.atan2(2.0 * (w * z + x * y), 1.0 - 2.0 * (y * y + z * z))
+            off = np.array([0.0, 4.0, 1.2])
+            off_x = off[0] * math.cos(yaw) - off[1] * math.sin(yaw)
+            off_y = off[0] * math.sin(yaw) + off[1] * math.cos(yaw)
+            dpos = np.array([rpos[0] + off_x, rpos[1] + off_y, rpos[2] + off[2]])
+            yq = np.array([math.cos(yaw / 2), 0.0, 0.0, math.sin(yaw / 2)])
+            side_q = np.array([0.701, 0.092, 0.092, -0.701])
+            dquat = quat_mul_np(yq, side_q)
+            if cam_state is None:
+                cam_state = (dpos, dquat)
+            else:
+                alpha = 0.06
+                p0, q0 = cam_state
+                p0 = p0 + alpha * (dpos - p0)
+                q0 = q0 + alpha * (dquat - q0)
+                q0 = q0 / np.linalg.norm(q0)
+                cam_state = (p0, q0)
+            env.unwrapped.scene["camera"].set_world_poses(
+                torch.tensor([cam_state[0]], dtype=torch.float32, device=env.unwrapped.device),
+                torch.tensor([cam_state[1]], dtype=torch.float32, device=env.unwrapped.device),
+            )
+
             timestep += 1
             # Exit the play loop after recording one video
             if timestep == args_cli.video_length:
