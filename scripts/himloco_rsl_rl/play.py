@@ -107,6 +107,18 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg: HIMOnPolicyRunnerCfg):
     env_cfg.log_dir = log_dir
     env_cfg.sim.log_dir = os.path.expanduser("~/isaaclab_logs/himloco")
 
+    # 添加跟随相机用于录视频（挂在 base 上，第三人称视角）
+    if args_cli.video:
+        from isaaclab.sensors import CameraCfg
+        env_cfg.scene.camera = CameraCfg(
+            prim_path="{ENV_REGEX_NS}/Robot/base",
+            update_period=0.0,
+            height=480,
+            width=640,
+            data_types=["rgb"],
+            offset=CameraCfg.OffsetCfg(pos=(-2.5, 0.0, 1.0), rot=(0.6502, 0.0, 0.0, -0.7599), convention="world"),
+        )
+
     # create isaac environment
     env = gym.make(args_cli.task, cfg=env_cfg)
 
@@ -184,7 +196,7 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg: HIMOnPolicyRunnerCfg):
             obs, privileged_obs, rewards, dones, infos, termination_ids, termination_privileged_obs = env.step(actions)
         
         if args_cli.video:
-            render_dict = env.unwrapped.render()
+            render_dict = env.unwrapped.render(rebuild_render_products=True)
             img = next(iter(render_dict.values()))
             video_frames.append(img[0].cpu().numpy())
             timestep += 1
