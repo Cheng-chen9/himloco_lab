@@ -108,19 +108,14 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg: HIMOnPolicyRunnerCfg):
     env_cfg.sim.log_dir = os.path.expanduser("~/isaaclab_logs/himloco")
 
     # create isaac environment
-    env = gym.make(args_cli.task, cfg=env_cfg, render_mode="rgb_array" if args_cli.video else None)
+    env = gym.make(args_cli.task, cfg=env_cfg)
 
-    # wrap for video recording
+    # 手动录帧（gymnasium RecordVideo 与 himloco 的 6 值 step 不兼容，改为逐帧采集）
+    video_frames = []
+    video_save_dir = os.path.join(log_dir, "videos", "play")
+    os.makedirs(video_save_dir, exist_ok=True)
     if args_cli.video:
-        video_kwargs = {
-            "video_folder": os.path.join(log_dir, "videos", "play"),
-            "step_trigger": lambda step: step == 0,
-            "video_length": args_cli.video_length,
-            "disable_logger": True,
-        }
-        print("[INFO] Recording videos during playback.")
-        print_dict(video_kwargs, nesting=4)
-        env = gym.wrappers.RecordVideo(env, **video_kwargs)
+        print("[INFO] Recording videos during playback (manual frame capture).")
 
     # wrap around environment for HimLoco RSL-RL
     env = HimlocoVecEnvWrapper(
@@ -189,6 +184,9 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg: HIMOnPolicyRunnerCfg):
             obs, privileged_obs, rewards, dones, infos, termination_ids, termination_privileged_obs = env.step(actions)
         
         if args_cli.video:
+            render_dict = env.unwrapped.render()
+            img = next(iter(render_dict.values()))
+            video_frames.append(img[0].cpu().numpy())
             timestep += 1
             # Exit the play loop after recording one video
             if timestep == args_cli.video_length:
@@ -198,6 +196,22 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg: HIMOnPolicyRunnerCfg):
         sleep_time = dt - (time.time() - start_time)
         if args_cli.real_time and sleep_time > 0:
             time.sleep(sleep_time)
+
+    # 合成录制的视频
+    if args_cli.video and video_frames:
+        import numpy as np
+        video_path = os.path.join(video_save_dir, "playback.mp4")
+        try:
+            from moviepy.editor import ImageSequenceClip
+            clip = ImageSequenceClip(video_frames, fps=30)
+            clip.write_videofile(video_path, codec="libx264", verbose=False, logger=None)
+            print(f"[INFO] Video saved to: {video_path}")
+        except Exception as e:
+            print("[WARN] mp4 合成失败，改为保存 PNG 帧:", e)
+            from PIL import Image
+            for idx, fr in enumerate(video_frames):
+                Image.fromarray(fr.astype(np.uint8)).save(os.path.join(video_save_dir, f"frame_{idx:04d}.png"))
+            print(f"[INFO] 已保存 {len(video_frames)} 张 PNG 到 {video_save_dir}")
 
     # close the simulator
     env.close()
