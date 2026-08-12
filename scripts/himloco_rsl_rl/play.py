@@ -105,6 +105,7 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg: HIMOnPolicyRunnerCfg):
 
     # set the log directory for the environment
     env_cfg.log_dir = log_dir
+    env_cfg.sim.log_dir = os.path.expanduser("~/isaaclab_logs/himloco")
 
     # create isaac environment
     env = gym.make(args_cli.task, cfg=env_cfg, render_mode="rgb_array" if args_cli.video else None)
