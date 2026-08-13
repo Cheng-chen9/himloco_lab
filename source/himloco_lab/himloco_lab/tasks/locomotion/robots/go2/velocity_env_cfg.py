@@ -483,6 +483,7 @@ class RobotEnvCfg(ManagerBasedRLEnvCfg):
     curriculum: CurriculumCfg = CurriculumCfg()
 
     def __post_init__(self):
+        self.sim.physx.gpu_collision_stack_size = 2**27  # 128MB, 8192 envs
         """Post initialization."""
         # general settings
         self.decimation = 4
